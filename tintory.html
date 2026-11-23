@@ -60,6 +60,8 @@
     .entry-info { flex:1; min-width:0; }
     .entry-info strong { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .entry-info small { display:block; margin-top:5px; color:#a39aa2; font-size:11px; }
+    .entry-preview { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; margin-top:6px; color:#685e68; font-size:12px; line-height:1.4; overflow-wrap:anywhere; }
+    .entry-preview div,.entry-preview p { display:inline; margin:0; }
     .entry-arrow { color:#b9adb4; font-size:19px; }
     .holiday-note { color:#c4788d; font-size:12px; font-weight:700; margin:0 2px 12px; }
     .empty-card { padding:23px 16px; text-align:center; color:#aca2aa; font-size:12px; line-height:1.7; }
@@ -91,6 +93,25 @@
     .field input,.field textarea,.field select { display:block; width:100%; margin-top:7px; border:1px solid #eae3e3; border-radius:12px; padding:12px 13px; outline:none; background:#faf8f6; color:#3d3540; font-size:13px; }
     .field textarea { min-height:100px; resize:vertical; line-height:1.6; }
     .field input:focus,.field textarea:focus,.field select:focus { border-color:#d592ab; background:white; }
+    .editor-tools { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px; padding:7px; border:1px solid #eae3e3; border-radius:12px 12px 0 0; background:#faf8f6; }
+    .editor-tools button { min-width:31px; height:31px; border:1px solid #e9e2e3; border-radius:8px; background:white; color:#514854; font-size:14px; font-weight:700; }
+    .editor-tools .tool-italic { font-style:italic; }
+    .editor-tools .tool-underline { text-decoration:underline; }
+    .editor-tools .tool-strike { text-decoration:line-through; }
+    .color-tool { display:flex; align-items:center; gap:4px; margin-left:3px; color:#736974; font-size:11px; }
+    .color-tool input { width:29px; height:29px; padding:2px; margin:0; border:1px solid #e9e2e3; border-radius:8px; background:white; }
+    .rich-editor { min-height:145px; max-height:40vh; overflow:auto; padding:13px; border:1px solid #eae3e3; border-top:0; border-radius:0 0 12px 12px; outline:none; background:#fff; color:#3d3540; font-size:14px; font-weight:400; line-height:1.65; overflow-wrap:anywhere; }
+    .rich-editor:focus { border-color:#d592ab; }
+    .rich-editor:empty:before { content:attr(data-placeholder); color:#b5aab2; }
+    .rich-editor p,.rich-editor div { margin:0 0 5px; }
+    .attach-actions { display:flex; gap:8px; margin:8px 0; }
+    .attach-actions button { flex:1; padding:10px 5px; border:1px solid #e9dce2; border-radius:11px; color:#a96582; background:#fff8fa; font-size:12px; font-weight:700; }
+    .attachments { display:grid; gap:8px; margin:9px 0 15px; }
+    .attachment { display:flex; align-items:center; gap:10px; min-width:0; padding:8px; border:1px solid #eee7e8; border-radius:12px; background:#faf8f6; }
+    .attachment img { width:50px; height:50px; object-fit:cover; border-radius:8px; }
+    .attachment-icon { width:50px; height:50px; display:grid; place-items:center; border-radius:8px; background:#f2e9ed; color:#bb7893; font-size:22px; }
+    .attachment-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#564b56; font-size:12px; }
+    .attachment button { border:0; background:transparent; color:#b5738a; font-size:12px; }
     .primary { width:100%; border:0; border-radius:13px; color:white; background:#c97c9b; padding:13px; font-size:13px; font-weight:750; margin-top:10px; }
     .delete { display:block; margin:13px auto 0; border:0; background:none; color:#c88793; font-size:12px; }
     @media (min-width:600px) { .app { margin:30px auto; min-height:790px; border-radius:30px; } .bottom-nav { border-radius:0 0 30px 30px; } }
@@ -129,6 +150,8 @@
       const state = { year: now.getFullYear(), month: now.getMonth() + 1, selected: today, filter: "all", view: "calendar" };
       const pending = new Map();
       const queue = [];
+      let draftAttachments = [];
+      let editorRange = null;
       let receiver = null;
       let serial = 0;
       window.TintoryBridge = {
@@ -143,7 +166,10 @@
       };
       function send(action, payload) {
         if (!native) {
-          if (action === "save") { localStorage.setItem(previewKey, JSON.stringify(payload.data)); return Promise.resolve({ ok: true, data: payload.data }); }
+          if (action === "save") {
+            try { localStorage.setItem(previewKey, JSON.stringify(payload.data)); return Promise.resolve({ ok: true, data: payload.data }); }
+            catch (_) { return Promise.resolve({ ok: false, message: "브라우저 저장 공간이 부족합니다. 첨부파일을 줄여 주세요." }); }
+          }
           if (action === "sync") return Promise.resolve({ ok: true, data: data, message: "PC 미리보기에서는 공휴일 동기화를 실행하지 않습니다." });
           return Promise.resolve({ ok: true, message: "이 기능은 아이폰에서 사용할 수 있습니다." });
         }
@@ -167,6 +193,68 @@
         return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
           return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
         });
+      }
+      function safeColor(value) {
+        return /^#[0-9a-f]{3,8}$/i.test(value || "") || /^rgba?\([\d\s.,%]+\)$/i.test(value || "") ? value : "";
+      }
+      function cleanHtml(html) {
+        const source = document.createElement("template");
+        source.innerHTML = html || "";
+        const allowed = new Set(["B", "STRONG", "I", "EM", "U", "S", "STRIKE", "SPAN", "FONT", "P", "DIV", "BR", "UL", "OL", "LI"]);
+        const blocked = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "SVG", "IMG", "VIDEO", "AUDIO", "FORM", "INPUT"]);
+        function copy(node, parent) {
+          if (node.nodeType === Node.TEXT_NODE) { parent.appendChild(document.createTextNode(node.textContent)); return; }
+          if (node.nodeType !== Node.ELEMENT_NODE || blocked.has(node.tagName)) return;
+          const tag = allowed.has(node.tagName) ? (node.tagName === "FONT" ? "span" : node.tagName.toLowerCase()) : "span";
+          const output = document.createElement(tag);
+          const color = safeColor(node.style && node.style.color || (node.tagName === "FONT" ? node.getAttribute("color") : ""));
+          const background = safeColor(node.style && node.style.backgroundColor);
+          if (color) output.style.color = color;
+          if (background) output.style.backgroundColor = background;
+          if (["center", "left", "right"].includes(node.style && node.style.textAlign)) output.style.textAlign = node.style.textAlign;
+          if (node.style && node.style.fontWeight === "bold") output.style.fontWeight = "bold";
+          if (node.style && node.style.fontStyle === "italic") output.style.fontStyle = "italic";
+          if (node.style && /underline|line-through/.test(node.style.textDecorationLine || node.style.textDecoration)) output.style.textDecoration = node.style.textDecorationLine || node.style.textDecoration;
+          Array.from(node.childNodes).forEach(function (child) { copy(child, output); });
+          parent.appendChild(output);
+        }
+        const result = document.createElement("div");
+        Array.from(source.content.childNodes).forEach(function (child) { copy(child, result); });
+        return result.innerHTML;
+      }
+      function attachmentMarkup(attachment, index) {
+        const thumb = typeof attachment.thumbnail === "string" && /^data:image\/(jpeg|png|gif|webp);base64,[a-z0-9+/=]+$/i.test(attachment.thumbnail)
+          ? '<img src="' + esc(attachment.thumbnail) + '" alt="">' : '<span class="attachment-icon">▤</span>';
+        return '<div class="attachment">' + thumb + '<span class="attachment-name">' + esc(attachment.name || "첨부파일") +
+          '</span><button type="button" data-open-attachment="' + index + '">열기</button><button type="button" data-remove-attachment="' + index + '" aria-label="첨부파일 제거">×</button></div>';
+      }
+      function renderAttachments() {
+        const el = document.getElementById("attachments");
+        if (el) el.innerHTML = draftAttachments.map(attachmentMarkup).join("");
+      }
+      function rememberSelection() {
+        const editor = document.getElementById("rich-editor");
+        const selection = window.getSelection();
+        if (editor && selection.rangeCount && editor.contains(selection.anchorNode)) editorRange = selection.getRangeAt(0).cloneRange();
+      }
+      function formatEditor(command, value) {
+        const editor = document.getElementById("rich-editor");
+        if (!editor) return;
+        editor.focus();
+        const selection = window.getSelection();
+        if (editorRange) { selection.removeAllRanges(); selection.addRange(editorRange); }
+        const worked = document.execCommand(command, false, value || null);
+        if (!worked && (command === "hiliteColor" || command === "foreColor") && selection.rangeCount && !selection.isCollapsed) {
+          const range = selection.getRangeAt(0);
+          const mark = document.createElement("span");
+          if (command === "hiliteColor") mark.style.backgroundColor = value;
+          else mark.style.color = value;
+          mark.appendChild(range.extractContents());
+          range.insertNode(mark);
+          selection.removeAllRanges();
+          const after = document.createRange(); after.selectNodeContents(mark); selection.addRange(after);
+        }
+        rememberSelection();
       }
       function themeFor(id) { return data.themes.find(function (x) { return x.id === id; }); }
       function holidaysOn(date) { return (data.holidays[date.slice(0, 7)] || {})[date] || []; }
@@ -232,8 +320,11 @@
         const kind = entry.kind === "diary" ? "일기" : "일정";
         const detail = [theme ? theme.name : "", kind, entry.time || ""].filter(Boolean).join(" · ");
         return '<button class="entry-card" data-entry="' + esc(entry.id) + '"><span class="entry-bar" style="background:' + esc(color) +
-          '"></span><span class="entry-info"><strong>' + esc(entry.title) + '</strong><small>' + esc(detail) +
-          '</small></span><span class="entry-arrow">›</span></button>';
+          '"></span><div class="entry-info"><strong>' + esc(entry.title) + '</strong><small>' + esc(detail) +
+          '</small>' + (entry.bodyHtml ? '<div class="entry-preview">' + cleanHtml(entry.bodyHtml) + '</div>' :
+          (entry.body ? '<div class="entry-preview">' + esc(entry.body) + '</div>' : '')) +
+          (entry.attachments && entry.attachments.length ? '<small>▧ 첨부파일 ' + entry.attachments.length + '개</small>' : '') +
+          '</div><span class="entry-arrow">›</span></button>';
       }
       function dayAgenda() {
         const date = state.selected;
@@ -293,6 +384,8 @@
       function entryForm(entry) {
         const edit = !!entry;
         const item = entry || { kind: state.view === "diary" ? "diary" : "event", date: state.selected, title: "", body: "", themeId: state.filter === "all" ? (data.themes[0] || {}).id : state.filter, time: "" };
+        draftAttachments = Array.isArray(item.attachments) ? item.attachments.slice() : [];
+        editorRange = null;
         showModal('<div class="modal-top"><h2>' + (edit ? "기록 수정" : "새 기록") + '</h2><button class="close" data-close="1">×</button></div>' +
           '<form id="entry-form"><input type="hidden" name="id" value="' + esc(item.id || "") + '">' +
           '<label class="field">종류<select name="kind"><option value="event"' + (item.kind === "event" ? " selected" : "") + '>일정</option><option value="diary"' +
@@ -302,10 +395,19 @@
             (item.themeId === t.id ? " selected" : "") + '>' + esc(t.name) + '</option>'; }).join("") + '</select></label>' +
           '<label class="field">제목<input name="title" maxlength="100" value="' + esc(item.title) + '" placeholder="오늘의 제목" required></label>' +
           '<label class="field">시간 (일정일 때)<input type="time" name="time" value="' + esc(item.time || "") + '"></label>' +
-          '<label class="field">내용<textarea name="body" placeholder="기억하고 싶은 내용을 적어보세요">' + esc(item.body || "") + '</textarea></label>' +
+          '<div class="field">내용<div class="editor-tools" role="toolbar" aria-label="글자 서식">' +
+          '<button type="button" data-format="bold" aria-label="굵게">B</button><button type="button" class="tool-italic" data-format="italic" aria-label="기울임">I</button>' +
+          '<button type="button" class="tool-underline" data-format="underline" aria-label="밑줄">U</button><button type="button" class="tool-strike" data-format="strikeThrough" aria-label="가운데 줄긋기">S</button>' +
+          '<label class="color-tool">글자색 <input type="color" data-color="foreColor" value="#594556" aria-label="글자색"></label>' +
+          '<label class="color-tool">배경색 <input type="color" data-color="hiliteColor" value="#fff1aa" aria-label="글자 배경색"></label></div>' +
+          '<div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="기억하고 싶은 내용을 적어보세요">' +
+          (item.bodyHtml ? cleanHtml(item.bodyHtml) : esc(item.body || "").replace(/\n/g, "<br>")) + '</div></div>' +
+          '<div class="field">첨부파일<div class="attach-actions"><button type="button" data-attach="photos">▧ 사진 앱</button><button type="button" data-attach="files">▤ 파일 앱</button></div>' +
+          '<div id="attachments" class="attachments"></div></div><input id="preview-photo" type="file" accept="image/*" hidden><input id="preview-file" type="file" hidden>' +
           '<button class="primary" type="submit">저장하기</button>' +
           (edit ? '<button class="delete" type="button" data-delete-entry="' + esc(item.id) + '">이 기록 삭제</button>' : "") +
           '</form>');
+        renderAttachments();
       }
       function themeForm(theme) {
         const edit = !!theme;
@@ -327,9 +429,48 @@
         render();
         if (reply.message) toast(reply.message);
       }
+      async function addPreviewFile(file) {
+        if (!file) return;
+        if (file.size > 1024 * 1024) { toast("PC 미리보기에서는 1MB 이하 파일을 첨부할 수 있습니다."); return; }
+        const previewData = await new Promise(function (resolve, reject) {
+          const reader = new FileReader();
+          reader.onload = function () { resolve(reader.result); };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        draftAttachments.push({ name: file.name, kind: file.type.startsWith("image/") ? "image" : "file",
+          thumbnail: file.type.startsWith("image/") ? previewData : "", previewData: previewData });
+        renderAttachments();
+      }
+      document.addEventListener("selectionchange", rememberSelection);
+      document.addEventListener("change", async function (event) {
+        if (event.target.dataset.color) { formatEditor(event.target.dataset.color, event.target.value); return; }
+        if (event.target.id === "preview-photo" || event.target.id === "preview-file") {
+          try { await addPreviewFile(event.target.files[0]); }
+          catch (_) { toast("파일을 읽을 수 없습니다."); }
+          event.target.value = "";
+        }
+      });
       document.addEventListener("click", async function (event) {
         const button = event.target.closest("button");
         if (!button) return;
+        if (button.dataset.format) { formatEditor(button.dataset.format); return; }
+        if (button.dataset.attach) {
+          if (!native) { document.getElementById(button.dataset.attach === "photos" ? "preview-photo" : "preview-file").click(); return; }
+          const reply = await send("attach", { source: button.dataset.attach });
+          if (reply.ok && reply.attachment) { draftAttachments.push(reply.attachment); renderAttachments(); }
+          else if (reply.message) toast(reply.message);
+          return;
+        }
+        if (button.dataset.removeAttachment !== undefined) { draftAttachments.splice(Number(button.dataset.removeAttachment), 1); renderAttachments(); return; }
+        if (button.dataset.openAttachment !== undefined) {
+          const attachment = draftAttachments[Number(button.dataset.openAttachment)];
+          if (!attachment) return;
+          if (!native && attachment.previewData) { const link = document.createElement("a"); link.href = attachment.previewData; link.download = attachment.name; link.click(); return; }
+          const reply = await send("openAttachment", { attachment: attachment });
+          if (!reply.ok) toast(reply.message || "첨부파일을 열 수 없습니다.");
+          return;
+        }
         if (button.dataset.view) { state.view = button.dataset.view; render(); return; }
         if (button.dataset.filter) { state.filter = button.dataset.filter; render(); return; }
         if (button.dataset.month) {
@@ -364,7 +505,9 @@
           const existing = data.entries.find(function (x) { return x.id === values.id; });
           const entry = existing || { id: String(Date.now()) + "-" + Math.random().toString(36).slice(2) };
           entry.date = values.date; entry.kind = values.kind; entry.themeId = values.themeId;
-          entry.title = values.title.trim(); entry.body = values.body.trim(); entry.time = values.time;
+          const editor = document.getElementById("rich-editor");
+          entry.title = values.title.trim(); entry.body = (editor.innerText || editor.textContent || "").trim();
+          entry.bodyHtml = cleanHtml(editor.innerHTML); entry.attachments = draftAttachments.slice(); entry.time = values.time;
           if (!entry.title) return;
           if (!existing) data.entries.push(entry);
           state.selected = entry.date;

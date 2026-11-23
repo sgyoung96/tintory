@@ -18,6 +18,8 @@ const folder = fm.joinPath(fm.documentsDirectory(), "Tintory");
 if (!fm.fileExists(folder)) fm.createDirectory(folder, true);
 const dataPath = fm.joinPath(folder, "tintory-data.json");
 const uiPath = fm.joinPath(folder, "tintory.html");
+const attachmentFolder = fm.joinPath(folder, "attachments");
+if (!fm.fileExists(attachmentFolder)) fm.createDirectory(attachmentFolder, true);
 let data = fm.fileExists(dataPath) ? JSON.parse(fm.readString(dataPath)) : DEFAULT_DATA;
 data.themes = data.themes || DEFAULT_DATA.themes;
 data.entries = data.entries || [];
@@ -25,6 +27,69 @@ data.holidays = data.holidays || {};
 data.holidaySync = data.holidaySync || {};
 function save() { fm.writeString(dataPath, JSON.stringify(data, null, 2)); }
 if (!fm.fileExists(dataPath)) save();
+
+function attachmentPath(attachment) {
+  if (!attachment || !/^a[0-9a-z-]{8,50}$/.test(attachment.id) ||
+      !/^\.[a-z0-9]{1,10}$/.test(attachment.ext)) throw new Error("첨부파일 경로가 올바르지 않습니다.");
+  return fm.joinPath(attachmentFolder, attachment.id + attachment.ext);
+}
+function thumbnail(image) {
+  const width = image.size.width;
+  const height = image.size.height;
+  const scale = Math.min(320 / width, 240 / height, 1);
+  const w = Math.max(1, Math.round(width * scale));
+  const h = Math.max(1, Math.round(height * scale));
+  const drawing = new DrawContext();
+  drawing.size = new Size(w, h);
+  drawing.opaque = true;
+  drawing.setFillColor(Color.white());
+  drawing.fillRect(new Rect(0, 0, w, h));
+  drawing.drawImageInRect(image, new Rect(0, 0, w, h));
+  return "data:image/jpeg;base64," + Data.fromJPEG(drawing.getImage()).toBase64String();
+}
+async function pickAttachment(source) {
+  const id = "a" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+  if (source === "photos") {
+    const image = await Photos.fromLibrary();
+    const attachment = { id: id, ext: ".jpg", name: "사진.jpg", kind: "image" };
+    fm.write(attachmentPath(attachment), Data.fromJPEG(image));
+    attachment.thumbnail = thumbnail(image);
+    return attachment;
+  }
+  if (source === "files") {
+    const selection = await DocumentPicker.openFile();
+    const selected = Array.isArray(selection) ? selection[0] : selection;
+    if (!selected) throw new Error("파일 선택을 취소했습니다.");
+    const originalName = fm.fileName(selected, true);
+    const ext = (originalName.match(/\.([a-z0-9]{1,10})$/i) || [null, "bin"])[1].toLowerCase();
+    const attachment = {
+      id: id, ext: "." + ext,
+      name: originalName, kind: "file"
+    };
+    const destination = attachmentPath(attachment);
+    try { fm.copy(selected, destination); }
+    catch (_) { fm.write(destination, Data.fromFile(selected)); }
+    if (["jpg", "jpeg", "png", "gif", "webp", "heic"].includes(ext)) {
+      try {
+        attachment.thumbnail = thumbnail(fm.readImage(destination));
+        attachment.kind = "image";
+      } catch (_) {}
+    }
+    return attachment;
+  }
+  throw new Error("첨부 위치가 올바르지 않습니다.");
+}
+function pruneAttachments() {
+  const used = new Set();
+  for (const entry of data.entries) {
+    for (const attachment of entry.attachments || []) {
+      try { used.add(fm.fileName(attachmentPath(attachment), true)); } catch (_) {}
+    }
+  }
+  for (const name of fm.listContents(attachmentFolder)) {
+    if (/^a[0-9a-z-]{8,50}\.[a-z0-9]{1,10}$/.test(name) && !used.has(name)) fm.remove(fm.joinPath(attachmentFolder, name));
+  }
+}
 
 async function notice(title, text) {
   const box = new Alert();
@@ -146,7 +211,16 @@ while (!dismissed) {
       if (!next || !Array.isArray(next.themes) || !Array.isArray(next.entries)) throw new Error("저장 데이터가 올바르지 않습니다.");
       data = { ...data, themes: next.themes, entries: next.entries };
       save();
+      try { pruneAttachments(); } catch (_) {}
       reply = { data: data };
+    } else if (event.action === "attach") {
+      reply = { attachment: await pickAttachment(event.payload.source) };
+    } else if (event.action === "openAttachment") {
+      const attachment = event.payload.attachment;
+      const path = attachmentPath(attachment);
+      if (!fm.fileExists(path)) throw new Error("첨부파일을 찾을 수 없습니다.");
+      await QuickLook.present(path, true);
+      reply = {};
     } else if (event.action === "sync") {
       reply = await syncMonth(event.payload.year, event.payload.month, !!event.payload.force);
     } else if (event.action === "setKey") {
