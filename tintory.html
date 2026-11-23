@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'none'">
+  <title>Tintory · 나의 하루에 색을</title>
+  <style>
+    :root { --ink:#312d35; --muted:#8f8992; --paper:#fffefa; --canvas:#f5f1ed; --rose:#dd7799; --line:#eee8e6; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body { background:#e8e2dc; color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; }
+    button,input,textarea,select { font:inherit; }
+    button { cursor:pointer; }
+    .app { width:min(100%,430px); min-height:100vh; margin:auto; background:var(--canvas); position:relative; box-shadow:0 24px 70px #483a4b1b; padding:0 22px calc(110px + env(safe-area-inset-bottom)); }
+    .top { display:flex; align-items:center; justify-content:space-between; padding:calc(26px + env(safe-area-inset-top)) 0 24px; }
+    .brand { display:flex; align-items:center; gap:10px; font-size:20px; font-weight:800; letter-spacing:-1.1px; }
+    .brand-mark { width:31px; height:31px; display:grid; place-items:center; border-radius:11px; color:#fff; background:linear-gradient(140deg,#f1a6ae,#cf79aa); box-shadow:0 6px 14px #d27fa552; font-size:20px; transform:rotate(-8deg); }
+    .top-date { color:#89818a; font-size:12px; font-weight:700; letter-spacing:.2px; }
+    .hero { position:relative; overflow:hidden; border-radius:25px; padding:23px 25px 22px; min-height:150px; color:white; background:linear-gradient(120deg,#d58bac 0%,#ce9eaf 55%,#c3a8ce 100%); box-shadow:0 14px 26px #b886a741; }
+    .hero:before,.hero:after { content:""; position:absolute; border:1px solid #ffffff65; border-radius:50%; width:180px; height:180px; right:-70px; top:-78px; }
+    .hero:after { width:132px; height:132px; right:-37px; top:50px; border-color:#ffffff42; }
+    .hero small { position:relative; z-index:1; display:block; font-size:11px; letter-spacing:1.4px; font-weight:800; opacity:.9; }
+    .hero h1 { position:relative; z-index:1; margin:13px 0 7px; font-size:24px; line-height:1.28; letter-spacing:-1.2px; font-weight:750; }
+    .hero p { position:relative; z-index:1; margin:0; font-size:12px; opacity:.92; }
+    .hero-sparkle { position:absolute; right:36px; top:62px; color:#fff9; font-size:36px; font-weight:200; }
+    .section-head { display:flex; align-items:center; justify-content:space-between; margin:29px 1px 14px; }
+    .section-head h2 { font-size:18px; margin:0; letter-spacing:-.7px; }
+    .subtle { color:var(--muted); font-size:12px; }
+    .icon-button { display:inline-grid; place-items:center; width:30px; height:30px; padding:0; border:0; border-radius:50%; background:transparent; color:#655e69; font-size:23px; }
+    .month-controls { display:flex; align-items:center; gap:4px; }
+    .month-controls strong { min-width:105px; text-align:center; font-size:17px; letter-spacing:-.5px; }
+    .theme-strip { display:flex; gap:8px; overflow-x:auto; padding-bottom:3px; scrollbar-width:none; }
+    .theme-strip::-webkit-scrollbar { display:none; }
+    .chip { flex:0 0 auto; border:1px solid #e9e3e2; border-radius:100px; background:#fffefa; color:#736c76; padding:8px 13px; font-size:12px; font-weight:700; }
+    .chip.active { border-color:#d88aa5; color:#bb6889; background:#fbe8ef; }
+    .chip-dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; vertical-align:1px; }
+    .calendar-card { background:var(--paper); margin-top:14px; border:1px solid #fff; border-radius:24px; box-shadow:0 10px 30px #71606b0e; padding:17px 10px 16px; }
+    .weekdays,.days { display:grid; grid-template-columns:repeat(7,1fr); }
+    .weekdays span { text-align:center; color:#aaa2a9; font-size:11px; font-weight:700; padding:0 0 12px; }
+    .weekdays span:first-child { color:#d9819a; }
+    .days { row-gap:4px; }
+    .day { min-width:0; height:48px; display:flex; align-items:center; flex-direction:column; justify-content:flex-start; padding:5px 0 0; border:0; background:transparent; border-radius:13px; color:#4c4650; }
+    .day.empty { visibility:hidden; }
+    .day .num { width:28px; height:28px; line-height:28px; border-radius:11px; text-align:center; font-size:12px; font-weight:700; }
+    .day.sunday .num,.day.holiday .num { color:#d47691; }
+    .day.selected .num { color:#fff; background:#cf7d9d; box-shadow:0 4px 9px #c87d9d50; }
+    .day.today:not(.selected) .num { background:#f8e8ed; }
+    .day .dots { display:flex; gap:2px; height:5px; align-items:center; }
+    .day .dots i { display:block; width:4px; height:4px; border-radius:50%; }
+    .calendar-foot { margin:12px 7px 0; padding-top:12px; border-top:1px solid #f2edeb; display:flex; justify-content:space-between; align-items:center; color:#aca3aa; font-size:11px; }
+    .text-link { border:0; background:none; color:#bb708d; font-weight:750; padding:0; font-size:11px; }
+    .day-title { display:flex; align-items:baseline; gap:8px; }
+    .day-title strong { font-size:18px; letter-spacing:-.6px; }
+    .day-title small { color:#99909a; font-size:12px; }
+    .entry-card,.empty-card,.space-card,.settings-card { background:#fffefa; border-radius:18px; border:1px solid #fff; box-shadow:0 5px 18px #71606b0b; }
+    .entry-card { display:flex; align-items:center; gap:12px; padding:14px 15px; margin:9px 0; text-align:left; width:100%; color:inherit; }
+    .entry-bar { width:4px; align-self:stretch; border-radius:3px; background:var(--rose); }
+    .entry-info { flex:1; min-width:0; }
+    .entry-info strong { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .entry-info small { display:block; margin-top:5px; color:#a39aa2; font-size:11px; }
+    .entry-arrow { color:#b9adb4; font-size:19px; }
+    .holiday-note { color:#c4788d; font-size:12px; font-weight:700; margin:0 2px 12px; }
+    .empty-card { padding:23px 16px; text-align:center; color:#aca2aa; font-size:12px; line-height:1.7; }
+    .empty-card b { display:block; color:#8b808b; font-size:24px; font-weight:400; }
+    .fab { position:fixed; right:max(24px,calc((100vw - 430px)/2 + 24px)); bottom:calc(88px + env(safe-area-inset-bottom)); width:52px; height:52px; display:grid; place-items:center; border:0; border-radius:18px; color:white; background:#cd7f9d; box-shadow:0 8px 18px #b56d8b60; font-size:30px; font-weight:300; z-index:3; }
+    .bottom-nav { position:fixed; bottom:0; left:50%; transform:translateX(-50%); width:min(100%,430px); height:calc(70px + env(safe-area-inset-bottom)); background:#fffefa; border-top:1px solid #f1ece8; display:grid; grid-template-columns:repeat(4,1fr); padding-bottom:env(safe-area-inset-bottom); z-index:2; }
+    .bottom-nav button { border:0; background:none; color:#aaa1aa; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; font-size:10px; font-weight:650; }
+    .bottom-nav button.active { color:#c97899; }
+    .nav-icon { font-size:22px; font-weight:400; height:24px; line-height:24px; }
+    .page-title { font-size:26px; letter-spacing:-1px; margin:3px 0 7px; }
+    .page-intro { color:#968c96; font-size:12px; line-height:1.6; margin:0 0 23px; }
+    .space-card { display:flex; align-items:center; gap:14px; padding:17px; width:100%; margin-bottom:10px; text-align:left; color:inherit; }
+    .space-icon { width:48px; height:48px; border-radius:15px; display:grid; place-items:center; font-size:21px; }
+    .space-card strong { display:block; font-size:14px; }
+    .space-card small { display:block; color:#a49aa3; margin-top:5px; font-size:11px; }
+    .settings-card { overflow:hidden; }
+    .settings-card button { display:flex; justify-content:space-between; align-items:center; width:100%; padding:16px 18px; border:0; border-bottom:1px solid var(--line); background:none; color:#5b5360; text-align:left; font-size:13px; }
+    .settings-card button:last-child { border-bottom:0; }
+    .settings-card span { color:#b8adb6; }
+    .toast { position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom)); transform:translateX(-50%); width:max-content; max-width:calc(100% - 40px); color:white; background:#4c424d; padding:11px 16px; border-radius:12px; box-shadow:0 10px 22px #0003; font-size:12px; z-index:20; display:none; }
+    .toast.show { display:block; }
+    .modal-backdrop { position:fixed; inset:0; background:#34293670; display:none; align-items:flex-end; justify-content:center; z-index:10; }
+    .modal-backdrop.open { display:flex; }
+    .modal { width:min(100%,430px); max-height:92vh; overflow:auto; border-radius:26px 26px 0 0; background:#fffefa; padding:23px 23px calc(28px + env(safe-area-inset-bottom)); box-shadow:0 -20px 60px #0002; }
+    .modal-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:19px; }
+    .modal-top h2 { margin:0; font-size:19px; letter-spacing:-.7px; }
+    .close { border:0; background:#f5f0ef; color:#6f626c; width:30px; height:30px; border-radius:50%; font-size:17px; }
+    .field { display:block; margin:12px 0; color:#827983; font-size:11px; font-weight:750; }
+    .field input,.field textarea,.field select { display:block; width:100%; margin-top:7px; border:1px solid #eae3e3; border-radius:12px; padding:12px 13px; outline:none; background:#faf8f6; color:#3d3540; font-size:13px; }
+    .field textarea { min-height:100px; resize:vertical; line-height:1.6; }
+    .field input:focus,.field textarea:focus,.field select:focus { border-color:#d592ab; background:white; }
+    .primary { width:100%; border:0; border-radius:13px; color:white; background:#c97c9b; padding:13px; font-size:13px; font-weight:750; margin-top:10px; }
+    .delete { display:block; margin:13px auto 0; border:0; background:none; color:#c88793; font-size:12px; }
+    @media (min-width:600px) { .app { margin:30px auto; min-height:790px; border-radius:30px; } .bottom-nav { border-radius:0 0 30px 30px; } }
+  </style>
+</head>
+<body data-tintory-ui="1">
+  <!--TINTORY_BOOTSTRAP-->
+  <div class="app" id="app"></div>
+  <div class="modal-backdrop" id="modal-backdrop"><div class="modal" id="modal"></div></div>
+  <div class="toast" id="toast" role="status"></div>
+  <script>
+    (function () {
+      "use strict";
+      const native = !!window.__TINTORY_NATIVE__;
+      const previewKey = "tintory-preview-v1";
+      const now = new Date();
+      const today = localDate(now);
+      const defaultData = {
+        version: 1,
+        themes: [
+          { id: "daily", name: "일상", color: "#e88dab" },
+          { id: "work", name: "업무", color: "#7d9bd5" },
+          { id: "health", name: "건강", color: "#7eb99b" }
+        ],
+        entries: [
+          { id: "sample-1", date: today, kind: "event", themeId: "daily", title: "좋아하는 음악과 산책", body: "오후 4:00", time: "16:00" },
+          { id: "sample-2", date: today, kind: "diary", themeId: "health", title: "오늘의 작은 기록", body: "오늘 하루도 나만의 색으로 채워 보기." }
+        ],
+        holidays: {}, holidaySync: {}
+      };
+      let data = window.__TINTORY_BOOTSTRAP__ || readPreview() || defaultData;
+      data.themes = data.themes || [];
+      data.entries = data.entries || [];
+      data.holidays = data.holidays || {};
+      data.holidaySync = data.holidaySync || {};
+      const state = { year: now.getFullYear(), month: now.getMonth() + 1, selected: today, filter: "all", view: "calendar" };
+      const pending = new Map();
+      const queue = [];
+      let receiver = null;
+      let serial = 0;
+      window.TintoryBridge = {
+        wait: function (completion) {
+          if (queue.length) completion(queue.shift());
+          else receiver = completion;
+        },
+        resolve: function (reply) {
+          const finish = pending.get(reply.id);
+          if (finish) { pending.delete(reply.id); finish(reply); }
+        }
+      };
+      function send(action, payload) {
+        if (!native) {
+          if (action === "save") { localStorage.setItem(previewKey, JSON.stringify(payload.data)); return Promise.resolve({ ok: true, data: payload.data }); }
+          if (action === "sync") return Promise.resolve({ ok: true, data: data, message: "PC 미리보기에서는 공휴일 동기화를 실행하지 않습니다." });
+          return Promise.resolve({ ok: true, message: "이 기능은 아이폰에서 사용할 수 있습니다." });
+        }
+        return new Promise(function (resolve) {
+          const event = { id: ++serial, action: action, payload: payload || {} };
+          pending.set(event.id, resolve);
+          if (receiver) { const cb = receiver; receiver = null; cb(event); }
+          else queue.push(event);
+        });
+      }
+      function readPreview() {
+        try { return JSON.parse(localStorage.getItem(previewKey)); }
+        catch (_) { return null; }
+      }
+      function localDate(date) {
+        return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+      }
+      function pad(n) { return String(n).padStart(2, "0"); }
+      function monthKey() { return state.year + "-" + pad(state.month); }
+      function esc(value) {
+        return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+      function themeFor(id) { return data.themes.find(function (x) { return x.id === id; }); }
+      function holidaysOn(date) { return (data.holidays[date.slice(0, 7)] || {})[date] || []; }
+      function entriesOn(date) {
+        return data.entries.filter(function (e) { return e.date === date && (state.filter === "all" || state.filter === e.themeId); });
+      }
+      function toast(text) {
+        const el = document.getElementById("toast");
+        el.textContent = text; el.classList.add("show");
+        clearTimeout(toast.timer); toast.timer = setTimeout(function () { el.classList.remove("show"); }, 3200);
+      }
+      function top() {
+        return '<div class="top"><div class="brand"><span class="brand-mark">✦</span>Tintory</div><div class="top-date">' +
+          esc(now.getFullYear() + ". " + pad(now.getMonth() + 1) + ". " + pad(now.getDate())) + '</div></div>';
+      }
+      function nav() {
+        const items = [["calendar", "▦", "달력"], ["diary", "▤", "기록"], ["spaces", "◈", "공간"], ["settings", "⚙", "설정"]];
+        return '<nav class="bottom-nav">' + items.map(function (item) {
+          return '<button data-view="' + item[0] + '" class="' + (state.view === item[0] ? "active" : "") + '">' +
+            '<span class="nav-icon">' + item[1] + '</span>' + item[2] + '</button>';
+        }).join("") + '</nav>';
+      }
+      function hero() {
+        return '<div class="hero"><small>MY COLORFUL DAYS</small><h1>나의 하루에<br>나만의 색을.</h1>' +
+          '<p>일정과 마음을 한곳에 담아보세요</p><span class="hero-sparkle">✳</span></div>';
+      }
+      function chips() {
+        return '<div class="theme-strip">' + [{ id: "all", name: "전체", color: "" }].concat(data.themes).map(function (t) {
+          return '<button class="chip ' + (state.filter === t.id ? "active" : "") + '" data-filter="' + esc(t.id) + '">' +
+            (t.color ? '<i class="chip-dot" style="background:' + esc(t.color) + '"></i>' : "") + esc(t.name) + '</button>';
+        }).join("") + '</div>';
+      }
+      function calendar() {
+        const start = new Date(state.year, state.month - 1, 1).getDay();
+        const count = new Date(state.year, state.month, 0).getDate();
+        const cells = [];
+        for (let i = 0; i < Math.ceil((start + count) / 7) * 7; i++) {
+          const day = i - start + 1;
+          if (day < 1 || day > count) { cells.push('<span class="day empty"></span>'); continue; }
+          const date = monthKey() + "-" + pad(day);
+          const entries = entriesOn(date);
+          const holiday = holidaysOn(date).length > 0;
+          const classes = ["day", i % 7 === 0 ? "sunday" : "", holiday ? "holiday" : "", date === state.selected ? "selected" : "", date === today ? "today" : ""].join(" ");
+          const dots = entries.slice(0, 3).map(function (e) {
+            const t = themeFor(e.themeId);
+            return '<i style="background:' + esc(t ? t.color : "#c58fa6") + '"></i>';
+          }).join("");
+          cells.push('<button class="' + classes + '" data-date="' + date + '" aria-label="' + date + '"><span class="num">' + day +
+            '</span><span class="dots">' + dots + '</span></button>');
+        }
+        const syncDate = data.holidaySync[monthKey()];
+        return '<div class="section-head"><h2>나의 달력</h2><div class="month-controls">' +
+          '<button class="icon-button" data-month="-1" aria-label="이전 달">‹</button><strong>' + state.year + '년 ' + state.month + '월</strong>' +
+          '<button class="icon-button" data-month="1" aria-label="다음 달">›</button></div></div>' + chips() +
+          '<div class="calendar-card"><div class="weekdays">' + ["일","월","화","수","목","금","토"].map(function (d) { return "<span>" + d + "</span>"; }).join("") +
+          '</div><div class="days">' + cells.join("") + '</div><div class="calendar-foot"><span>' +
+          (syncDate ? "공휴일 " + esc(syncDate.slice(0, 10)) + " 업데이트" : "공휴일 미동기화") +
+          '</span><button class="text-link" data-sync="1">공휴일 새로고침 ↗</button></div></div>';
+      }
+      function entryCard(entry) {
+        const theme = themeFor(entry.themeId);
+        const color = theme ? theme.color : "#d08eaa";
+        const kind = entry.kind === "diary" ? "일기" : "일정";
+        const detail = [theme ? theme.name : "", kind, entry.time || ""].filter(Boolean).join(" · ");
+        return '<button class="entry-card" data-entry="' + esc(entry.id) + '"><span class="entry-bar" style="background:' + esc(color) +
+          '"></span><span class="entry-info"><strong>' + esc(entry.title) + '</strong><small>' + esc(detail) +
+          '</small></span><span class="entry-arrow">›</span></button>';
+      }
+      function dayAgenda() {
+        const date = state.selected;
+        const d = new Date(date + "T12:00:00");
+        const label = (d.getMonth() + 1) + "월 " + d.getDate() + "일";
+        const weekday = ["일","월","화","수","목","금","토"][d.getDay()] + "요일";
+        const holiday = holidaysOn(date);
+        const entries = entriesOn(date);
+        return '<div class="section-head"><div class="day-title"><strong>' + label + '</strong><small>' + weekday +
+          '</small></div><span class="subtle">' + entries.length + '개의 기록</span></div>' +
+          (holiday.length ? '<p class="holiday-note">✦ ' + esc(holiday.join(" · ")) + '</p>' : "") +
+          (entries.length ? entries.map(entryCard).join("") : '<div class="empty-card"><b>✦</b>아직 기록이 없어요.<br>오늘의 이야기를 남겨보세요.</div>');
+      }
+      function diaryPage() {
+        const items = data.entries.filter(function (e) { return e.kind === "diary" && (state.filter === "all" || state.filter === e.themeId); })
+          .slice().sort(function (a,b) { return b.date.localeCompare(a.date); });
+        return '<h1 class="page-title">나의 기록</h1><p class="page-intro">차곡차곡 쌓인 하루의 장면들</p>' + chips() +
+          '<div class="section-head"><h2>일기 모아보기</h2><span class="subtle">' + items.length + '개의 이야기</span></div>' +
+          (items.length ? items.map(function (e) {
+            return '<div class="subtle" style="margin:17px 3px 6px">' + esc(e.date) + '</div>' + entryCard(e);
+          }).join("") : '<div class="empty-card">첫 일기를 남겨보세요.</div>');
+      }
+      function spacesPage() {
+        const symbols = ["♡","▣","✳","✦","◌"];
+        return '<h1 class="page-title">나의 공간</h1><p class="page-intro">일상에 어울리는 색을 골라 기록을 나눠보세요.</p>' +
+          data.themes.map(function (t, i) {
+            const count = data.entries.filter(function (e) { return e.themeId === t.id; }).length;
+            return '<button class="space-card" data-theme="' + esc(t.id) + '"><span class="space-icon" style="background:' + esc(t.color) +
+              '25;color:' + esc(t.color) + '">' + symbols[i % symbols.length] + '</span><span style="flex:1"><strong>' + esc(t.name) +
+              '</strong><small>' + count + '개의 기록 · ' + esc(t.color.toUpperCase()) + '</small></span><span class="entry-arrow">›</span></button>';
+          }).join("") + '<button class="primary" data-add-theme="1">+ 새로운 공간 만들기</button>';
+      }
+      function settingsPage() {
+        return '<h1 class="page-title">설정</h1><p class="page-intro">틴토리의 화면과 공휴일 정보를 관리해요.</p>' +
+          '<div class="section-head"><h2>동기화</h2></div><div class="settings-card">' +
+          '<button data-sync="1">공휴일 새로고침 <span>↗</span></button>' +
+          '<button data-key="1">공휴일 API 키 변경 <span>›</span></button>' +
+          '<button data-update="1">새 화면 확인 <span>↗</span></button></div>' +
+          '<div class="section-head"><h2>내 데이터</h2></div><div class="settings-card">' +
+          '<button data-today="1">오늘 날짜로 이동 <span>›</span></button></div>' +
+          '<p class="page-intro" style="margin:16px 2px">일정과 일기는 아이폰의 Scriptable 로컬 파일에 저장됩니다. PC 미리보기의 기록은 이 브라우저에만 저장됩니다.</p>';
+      }
+      function render() {
+        let content = "";
+        if (state.view === "calendar") content = hero() + calendar() + dayAgenda();
+        if (state.view === "diary") content = diaryPage();
+        if (state.view === "spaces") content = spacesPage();
+        if (state.view === "settings") content = settingsPage();
+        const fab = state.view === "calendar" || state.view === "diary" ? '<button class="fab" data-add="1" aria-label="기록 추가">+</button>' : "";
+        document.getElementById("app").innerHTML = top() + content + fab + nav();
+      }
+      function closeModal() { document.getElementById("modal-backdrop").classList.remove("open"); }
+      function showModal(html) {
+        document.getElementById("modal").innerHTML = html;
+        document.getElementById("modal-backdrop").classList.add("open");
+      }
+      function entryForm(entry) {
+        const edit = !!entry;
+        const item = entry || { kind: state.view === "diary" ? "diary" : "event", date: state.selected, title: "", body: "", themeId: state.filter === "all" ? (data.themes[0] || {}).id : state.filter, time: "" };
+        showModal('<div class="modal-top"><h2>' + (edit ? "기록 수정" : "새 기록") + '</h2><button class="close" data-close="1">×</button></div>' +
+          '<form id="entry-form"><input type="hidden" name="id" value="' + esc(item.id || "") + '">' +
+          '<label class="field">종류<select name="kind"><option value="event"' + (item.kind === "event" ? " selected" : "") + '>일정</option><option value="diary"' +
+          (item.kind === "diary" ? " selected" : "") + '>일기</option></select></label>' +
+          '<label class="field">날짜<input type="date" name="date" value="' + esc(item.date) + '" required></label>' +
+          '<label class="field">공간<select name="themeId">' + data.themes.map(function (t) { return '<option value="' + esc(t.id) + '"' +
+            (item.themeId === t.id ? " selected" : "") + '>' + esc(t.name) + '</option>'; }).join("") + '</select></label>' +
+          '<label class="field">제목<input name="title" maxlength="100" value="' + esc(item.title) + '" placeholder="오늘의 제목" required></label>' +
+          '<label class="field">시간 (일정일 때)<input type="time" name="time" value="' + esc(item.time || "") + '"></label>' +
+          '<label class="field">내용<textarea name="body" placeholder="기억하고 싶은 내용을 적어보세요">' + esc(item.body || "") + '</textarea></label>' +
+          '<button class="primary" type="submit">저장하기</button>' +
+          (edit ? '<button class="delete" type="button" data-delete-entry="' + esc(item.id) + '">이 기록 삭제</button>' : "") +
+          '</form>');
+      }
+      function themeForm(theme) {
+        const edit = !!theme;
+        showModal('<div class="modal-top"><h2>' + (edit ? "공간 수정" : "새 공간") + '</h2><button class="close" data-close="1">×</button></div>' +
+          '<form id="theme-form"><input type="hidden" name="id" value="' + esc(theme ? theme.id : "") + '">' +
+          '<label class="field">공간 이름<input name="name" maxlength="30" value="' + esc(theme ? theme.name : "") + '" placeholder="예: 여행" required></label>' +
+          '<label class="field">나만의 색<input type="color" name="color" value="' + esc(theme ? theme.color : "#b69ed5") + '"></label>' +
+          '<button class="primary" type="submit">저장하기</button></form>');
+      }
+      async function persist() {
+        const reply = await send("save", { data: data });
+        if (!reply.ok) toast("저장 실패: " + reply.message);
+        else if (reply.data) data = reply.data;
+        return reply.ok;
+      }
+      async function sync(force) {
+        const reply = await send("sync", { year: state.year, month: state.month, force: !!force });
+        if (reply.data) data = reply.data;
+        render();
+        if (reply.message) toast(reply.message);
+      }
+      document.addEventListener("click", async function (event) {
+        const button = event.target.closest("button");
+        if (!button) return;
+        if (button.dataset.view) { state.view = button.dataset.view; render(); return; }
+        if (button.dataset.filter) { state.filter = button.dataset.filter; render(); return; }
+        if (button.dataset.month) {
+          const next = new Date(state.year, state.month - 1 + Number(button.dataset.month), 1);
+          state.year = next.getFullYear(); state.month = next.getMonth() + 1;
+          state.selected = monthKey() + "-01"; render(); await sync(false); return;
+        }
+        if (button.dataset.date) { state.selected = button.dataset.date; render(); return; }
+        if (button.dataset.entry) { entryForm(data.entries.find(function (x) { return x.id === button.dataset.entry; })); return; }
+        if (button.dataset.add) { entryForm(null); return; }
+        if (button.dataset.theme) { themeForm(themeFor(button.dataset.theme)); return; }
+        if (button.dataset.addTheme) { themeForm(null); return; }
+        if (button.dataset.close) { closeModal(); return; }
+        if (button.dataset.deleteEntry) {
+          if (!confirm("이 기록을 삭제할까요?")) return;
+          data.entries = data.entries.filter(function (x) { return x.id !== button.dataset.deleteEntry; });
+          if (await persist()) { closeModal(); render(); toast("기록을 삭제했습니다."); } return;
+        }
+        if (button.dataset.sync) { await sync(true); return; }
+        if (button.dataset.key) { const r = await send("setKey"); toast(r.message || ""); return; }
+        if (button.dataset.update) { const r = await send("update"); toast(r.message || ""); return; }
+        if (button.dataset.today) { state.year = now.getFullYear(); state.month = now.getMonth() + 1; state.selected = today; state.view = "calendar"; render(); }
+      });
+      document.getElementById("modal-backdrop").addEventListener("click", function (event) {
+        if (event.target.id === "modal-backdrop") closeModal();
+      });
+      document.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        const form = event.target;
+        const values = Object.fromEntries(new FormData(form).entries());
+        if (form.getAttribute("id") === "entry-form") {
+          const existing = data.entries.find(function (x) { return x.id === values.id; });
+          const entry = existing || { id: String(Date.now()) + "-" + Math.random().toString(36).slice(2) };
+          entry.date = values.date; entry.kind = values.kind; entry.themeId = values.themeId;
+          entry.title = values.title.trim(); entry.body = values.body.trim(); entry.time = values.time;
+          if (!entry.title) return;
+          if (!existing) data.entries.push(entry);
+          state.selected = entry.date;
+          state.year = Number(entry.date.slice(0, 4)); state.month = Number(entry.date.slice(5, 7));
+        } else if (form.getAttribute("id") === "theme-form") {
+          const existing = themeFor(values.id);
+          if (existing) { existing.name = values.name.trim(); existing.color = values.color; }
+          else data.themes.push({ id: "theme-" + Date.now(), name: values.name.trim(), color: values.color });
+        } else return;
+        if (await persist()) { closeModal(); render(); toast("저장했습니다."); }
+      });
+      render();
+      if (native) sync(false);
+    })();
+  </script>
+</body>
+</html>

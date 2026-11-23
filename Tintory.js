@@ -1,323 +1,172 @@
-// Tintory for Scriptable. Keep this file free of API keys and personal records.
-const HOLIDAY_API = "https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo";
+// Tintory WebView launcher. Paste this file into a Scriptable script named Tintory.
+async function main() {
+const UI_URL = "https://raw.githubusercontent.com/sgyoung96/tintory/main/tintory.html";
+const API_URL = "https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo";
 const KEY_NAME = "tintory.holidayApiKey";
-const DATA_FILE = "tintory-data.json";
-const DEFAULT_THEMES = [
-  { id: "daily", name: "일상", color: "#e88dab" },
-  { id: "work", name: "업무", color: "#7d9bd5" },
-  { id: "health", name: "건강", color: "#7eb99b" },
-];
+const DEFAULT_DATA = {
+  version: 1,
+  themes: [
+    { id: "daily", name: "일상", color: "#e88dab" },
+    { id: "work", name: "업무", color: "#7d9bd5" },
+    { id: "health", name: "건강", color: "#7eb99b" }
+  ],
+  entries: [], holidays: {}, holidaySync: {}
+};
 
-function emptyData() {
-  return { version: 1, themes: DEFAULT_THEMES.map(x => ({ ...x })), entries: [], holidays: {}, holidaySync: {} };
+const fm = FileManager.local();
+const folder = fm.joinPath(fm.documentsDirectory(), "Tintory");
+if (!fm.fileExists(folder)) fm.createDirectory(folder, true);
+const dataPath = fm.joinPath(folder, "tintory-data.json");
+const uiPath = fm.joinPath(folder, "tintory.html");
+let data = fm.fileExists(dataPath) ? JSON.parse(fm.readString(dataPath)) : DEFAULT_DATA;
+data.themes = data.themes || DEFAULT_DATA.themes;
+data.entries = data.entries || [];
+data.holidays = data.holidays || {};
+data.holidaySync = data.holidaySync || {};
+function save() { fm.writeString(dataPath, JSON.stringify(data, null, 2)); }
+if (!fm.fileExists(dataPath)) save();
+
+async function notice(title, text) {
+  const box = new Alert();
+  box.title = title; box.message = text; box.addAction("확인");
+  await box.presentAlert();
 }
-
-function pad(n) { return String(n).padStart(2, "0"); }
-function monthKey(year, month) { return `${year}-${pad(month)}`; }
-function dateKey(year, month, day) { return `${monthKey(year, month)}-${pad(day)}`; }
-
-function parseHolidayXml(xml) {
-  const tag = (body, name) => {
-    const match = body.match(new RegExp(`<${name}>([\\s\\S]*?)<\\/${name}>`, "i"));
-    return match ? match[1].trim() : "";
-  };
-  const decode = value => value.replace(/&amp;/g, "&").replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_, code) =>
-      String.fromCodePoint(code[0].toLowerCase() === "x" ? parseInt(code.slice(1), 16) : Number(code)));
-  const code = tag(xml, "resultCode");
-  if (code && code !== "00") throw new Error(`공휴일 API 오류: ${code} ${tag(xml, "resultMsg")}`);
-  if (!/<response[\s>]/i.test(xml)) throw new Error("공휴일 API 응답 형식을 확인할 수 없습니다.");
-  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].map(match => ({
-    date: tag(match[1], "locdate"),
-    name: decode(tag(match[1], "dateName")),
-    isHoliday: tag(match[1], "isHoliday") === "Y",
-  })).filter(item => /^\d{8}$/.test(item.date) && item.name && item.isHoliday);
-  return { items, totalCount: Number(tag(xml, "totalCount") || 0) };
+async function askKey() {
+  const box = new Alert();
+  box.title = "공휴일 API 키";
+  box.message = "공공데이터포털 특일 정보 서비스키를 입력하세요. 아이폰 Keychain에만 저장됩니다.";
+  box.addSecureTextField("서비스키", "");
+  box.addAction("저장"); box.addCancelAction("취소");
+  if (await box.presentAlert() < 0) return false;
+  const key = box.textFieldValue(0).trim();
+  if (!key) return false;
+  Keychain.set(KEY_NAME, key);
+  return true;
 }
-
-function normalizeKey(raw) {
-  const trimmed = raw.trim();
-  if (!trimmed) throw new Error("API 키가 비어 있습니다.");
-  try { return encodeURIComponent(decodeURIComponent(trimmed)); }
-  catch (_) { return encodeURIComponent(trimmed); }
+function encodedKey(raw) {
+  try { return encodeURIComponent(decodeURIComponent(raw.trim())); }
+  catch (_) { return encodeURIComponent(raw.trim()); }
 }
-
-function applyHolidays(data, year, month, items, syncedAt) {
-  const key = monthKey(year, month);
-  const prefix = `${year}${pad(month)}`;
-  const holidays = {};
-  for (const item of items) {
-    if (!item.date.startsWith(prefix)) continue;
-    const day = `${key}-${item.date.slice(6)}`;
-    if (!holidays[day]) holidays[day] = [];
-    if (!holidays[day].includes(item.name)) holidays[day].push(item.name);
-  }
-  data.holidays[key] = holidays;
-  data.holidaySync[key] = syncedAt;
-  return data;
+function xmlTag(xml, tag) {
+  const match = xml.match(new RegExp("<" + tag + ">([\\s\\S]*?)</" + tag + ">", "i"));
+  return match ? match[1].trim() : "";
 }
-
-async function fetchHolidays(year, month, encodedKey, makeRequest) {
+function decodeXml(value) {
+  return value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+async function fetchHolidays(year, month) {
   const result = [];
   let page = 1;
   while (true) {
-    const url = `${HOLIDAY_API}?ServiceKey=${encodedKey}&solYear=${year}&solMonth=${pad(month)}&numOfRows=100&pageNo=${page}`;
-    const request = makeRequest(url);
+    const url = API_URL + "?ServiceKey=" + encodedKey(Keychain.get(KEY_NAME)) +
+      "&solYear=" + year + "&solMonth=" + String(month).padStart(2, "0") +
+      "&numOfRows=100&pageNo=" + page;
+    const request = new Request(url);
     request.timeoutInterval = 20;
     const xml = await request.loadString();
-    if (request.response && request.response.statusCode !== 200) {
-      throw new Error(`공휴일 API HTTP ${request.response.statusCode}`);
+    if (request.response && request.response.statusCode !== 200) throw new Error("공휴일 API HTTP " + request.response.statusCode);
+    const code = xmlTag(xml, "resultCode");
+    if (code && code !== "00") throw new Error("공휴일 API 오류: " + code + " " + xmlTag(xml, "resultMsg"));
+    if (!/<response[\s>]/i.test(xml)) throw new Error("공휴일 API 응답 형식이 올바르지 않습니다.");
+    const items = Array.from(xml.matchAll(/<item>([\s\S]*?)<\/item>/gi));
+    for (const match of items) {
+      const body = match[1];
+      if (xmlTag(body, "isHoliday") === "Y") {
+        result.push({ date: xmlTag(body, "locdate"), name: decodeXml(xmlTag(body, "dateName")) });
+      }
     }
-    const parsed = parseHolidayXml(xml);
-    result.push(...parsed.items);
-    if (page * 100 >= parsed.totalCount || parsed.totalCount === 0) break;
+    const total = Number(xmlTag(xml, "totalCount") || 0);
+    if (!total || page * 100 >= total) break;
     page++;
   }
   return result;
 }
-
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { emptyData, parseHolidayXml, normalizeKey, applyHolidays, fetchHolidays, monthKey, dateKey };
+async function syncMonth(year, month, force) {
+  if (!Number.isInteger(year) || year < 1900 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new Error("날짜가 올바르지 않습니다.");
+  }
+  const key = year + "-" + String(month).padStart(2, "0");
+  const last = data.holidaySync[key] ? Date.parse(data.holidaySync[key]) : 0;
+  if (!force && Date.now() - last < 86400000) return { data: data, message: "" };
+  if (!Keychain.contains(KEY_NAME)) {
+    if (!force) return { data: data, message: "" };
+    if (!await askKey()) return { data: data, message: "키 입력을 취소했습니다." };
+  }
+  const items = await fetchHolidays(year, month);
+  const holidays = {};
+  for (const item of items) {
+    if (!/^\d{8}$/.test(item.date) || !item.date.startsWith(key.replace("-", "")) || !item.name) continue;
+    const date = key + "-" + item.date.slice(6);
+    if (!holidays[date]) holidays[date] = [];
+    if (!holidays[date].includes(item.name)) holidays[date].push(item.name);
+  }
+  data.holidays[key] = holidays;
+  data.holidaySync[key] = new Date().toISOString();
+  save();
+  return { data: data, message: "공휴일 " + items.length + "건을 확인했습니다." };
+}
+async function updateUi() {
+  const request = new Request(UI_URL + "?v=" + Date.now());
+  request.timeoutInterval = 10;
+  const html = await request.loadString();
+  if (request.response && request.response.statusCode !== 200) throw new Error("화면 다운로드 HTTP " + request.response.statusCode);
+  if (!html.includes('data-tintory-ui="1"') || !html.includes("<!--TINTORY_BOOTSTRAP-->")) {
+    throw new Error("화면 파일 형식이 올바르지 않습니다.");
+  }
+  fm.writeString(uiPath, html);
 }
 
-if (typeof FileManager !== "undefined") {
-  await runTintory();
+try { await updateUi(); }
+catch (error) {
+  if (!fm.fileExists(uiPath)) {
+    await notice("첫 화면을 받을 수 없어요", "인터넷 연결을 확인하고 다시 실행해 주세요.\n" + error.message);
+    Script.complete();
+    return;
+  }
 }
 
-async function runTintory() {
-  const fm = FileManager.local();
-  const folder = fm.joinPath(fm.documentsDirectory(), "Tintory");
-  if (!fm.fileExists(folder)) fm.createDirectory(folder, true);
-  const file = fm.joinPath(folder, DATA_FILE);
-  let data = fm.fileExists(file) ? JSON.parse(fm.readString(file)) : emptyData();
-  data.themes = data.themes || DEFAULT_THEMES.map(x => ({ ...x }));
-  data.entries = data.entries || [];
-  data.holidays = data.holidays || {};
-  data.holidaySync = data.holidaySync || {};
-  const save = () => fm.writeString(file, JSON.stringify(data, null, 2));
-  if (!fm.fileExists(file)) save();
-
-  const today = new Date();
-  const state = { year: today.getFullYear(), month: today.getMonth() + 1, date: null, filter: "all", screen: "month" };
-  const table = new UITable();
-  table.showSeparators = false;
-
-  async function message(title, body) {
-    const alert = new Alert();
-    alert.title = title;
-    alert.message = body;
-    alert.addAction("확인");
-    await alert.presentAlert();
-  }
-
-  async function askKey() {
-    const alert = new Alert();
-    alert.title = "공휴일 API 키";
-    alert.message = "공공데이터포털 한국천문연구원 특일 정보 서비스키를 입력하세요. 키는 아이폰 Keychain에만 저장됩니다.";
-    alert.addSecureTextField("서비스키", "");
-    alert.addAction("저장");
-    alert.addCancelAction("취소");
-    if (await alert.presentAlert() < 0) return false;
-    const key = alert.textFieldValue(0).trim();
-    if (!key) return false;
-    Keychain.set(KEY_NAME, key);
-    return true;
-  }
-
-  async function syncHolidays(force) {
-    const key = monthKey(state.year, state.month);
-    const last = data.holidaySync[key] ? Date.parse(data.holidaySync[key]) : 0;
-    if (!force && Date.now() - last < 24 * 60 * 60 * 1000) return;
-    if (!Keychain.contains(KEY_NAME)) {
-      if (!force) return;
-      if (!await askKey()) return;
-    }
-    try {
-      const items = await fetchHolidays(state.year, state.month, normalizeKey(Keychain.get(KEY_NAME)), url => new Request(url));
-      applyHolidays(data, state.year, state.month, items, new Date().toISOString());
+const payload = JSON.stringify(data).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+const bootstrap = "<script>window.__TINTORY_BOOTSTRAP__=" + payload + ";window.__TINTORY_NATIVE__=true;<" + "/script>";
+const html = fm.readString(uiPath).replace("<!--TINTORY_BOOTSTRAP-->", bootstrap);
+const view = new WebView();
+await view.loadHTML(html);
+let dismissed = false;
+const closed = view.present(true).then(() => { dismissed = true; return { closed: true }; });
+while (!dismissed) {
+  let event;
+  try {
+    event = await Promise.race([view.evaluateJavaScript("window.TintoryBridge.wait(completion)", true), closed]);
+  } catch (_) { break; }
+  if (!event || event.closed || dismissed) break;
+  let reply;
+  try {
+    if (event.action === "save") {
+      const next = event.payload.data;
+      if (!next || !Array.isArray(next.themes) || !Array.isArray(next.entries)) throw new Error("저장 데이터가 올바르지 않습니다.");
+      data = { ...data, themes: next.themes, entries: next.entries };
       save();
-      if (force) await message("동기화 완료", `${state.year}년 ${state.month}월 공휴일 ${items.length}건을 확인했습니다.`);
-    } catch (error) {
-      if (force) await message("동기화 실패", `${error.message}\n저장된 공휴일은 유지됩니다.`);
+      reply = { data: data };
+    } else if (event.action === "sync") {
+      reply = await syncMonth(event.payload.year, event.payload.month, !!event.payload.force);
+    } else if (event.action === "setKey") {
+      reply = { message: await askKey() ? "API 키를 저장했습니다." : "키 입력을 취소했습니다." };
+    } else if (event.action === "update") {
+      await updateUi();
+      reply = { message: "새 화면을 저장했습니다. 틴토리를 다시 열면 적용됩니다." };
+    } else {
+      throw new Error("알 수 없는 요청입니다.");
     }
+    reply.ok = true;
+  } catch (error) {
+    reply = { ok: false, message: error.message };
   }
-
-  function actionRow(label, action, subtitle = "") {
-    const row = new UITableRow();
-    row.height = 48;
-    row.dismissOnSelect = false;
-    row.addText(label, subtitle);
-    row.onSelect = async () => { await action(); render(); };
-    table.addRow(row);
-    return row;
-  }
-
-  function header(label) {
-    const row = new UITableRow();
-    row.isHeader = true;
-    row.addText(label);
-    table.addRow(row);
-  }
-
-  function render() {
-    table.removeAllRows();
-    if (state.screen === "date") renderDate();
-    else renderMonth();
-    table.reload();
-  }
-
-  function renderMonth() {
-    header(`틴토리 · ${state.year}년 ${state.month}월`);
-    const controls = new UITableRow();
-    for (const [label, delta] of [["‹ 이전", -1], ["오늘", 0], ["다음 ›", 1]]) {
-      const cell = controls.addButton(label);
-      cell.onTap = async () => {
-        if (delta === 0) { state.year = today.getFullYear(); state.month = today.getMonth() + 1; }
-        else {
-          const next = new Date(state.year, state.month - 1 + delta, 1);
-          state.year = next.getFullYear(); state.month = next.getMonth() + 1;
-        }
-        await syncHolidays(false); render();
-      };
-    }
-    table.addRow(controls);
-    const filters = new UITableRow();
-    for (const theme of [{ id: "all", name: "전체" }, ...data.themes]) {
-      const cell = filters.addButton(state.filter === theme.id ? `● ${theme.name}` : theme.name);
-      if (theme.color) cell.titleColor = new Color(theme.color);
-      cell.onTap = () => { state.filter = theme.id; render(); };
-    }
-    table.addRow(filters);
-    const weekdays = new UITableRow();
-    weekdays.isHeader = true;
-    for (const day of ["일", "월", "화", "수", "목", "금", "토"]) weekdays.addText(day).centerAligned();
-    table.addRow(weekdays);
-
-    const firstWeekday = new Date(state.year, state.month - 1, 1).getDay();
-    const days = new Date(state.year, state.month, 0).getDate();
-    for (let week = 0; week < Math.ceil((firstWeekday + days) / 7); week++) {
-      const row = new UITableRow();
-      row.height = 60;
-      for (let column = 0; column < 7; column++) {
-        const day = week * 7 + column - firstWeekday + 1;
-        if (day < 1 || day > days) { row.addText(" "); continue; }
-        const date = dateKey(state.year, state.month, day);
-        const entries = data.entries.filter(e => e.date === date && (state.filter === "all" || e.themeId === state.filter));
-        const holidays = (data.holidays[monthKey(state.year, state.month)] || {})[date] || [];
-        const marker = `${holidays.length ? "🔴" : ""}${entries.length ? "•" : ""}`;
-        const cell = row.addButton(`${day}${marker}`);
-        if (holidays.length) cell.titleColor = Color.red();
-        else if (entries.length) {
-          const theme = data.themes.find(t => t.id === entries[0].themeId);
-          if (theme) cell.titleColor = new Color(theme.color);
-        }
-        cell.onTap = () => { state.date = date; state.screen = "date"; render(); };
-      }
-      table.addRow(row);
-    }
-    actionRow("공휴일 동기화", () => syncHolidays(true), "현재 월의 대한민국 공휴일을 새로 가져옵니다.");
-    actionRow("공휴일 API 키 변경", async () => {
-      if (await askKey()) await syncHolidays(true);
-    });
-    actionRow("테마 관리", manageThemes);
-    const key = monthKey(state.year, state.month);
-    if (data.holidaySync[key]) actionRow(`마지막 동기화: ${data.holidaySync[key].slice(0, 10)}`, async () => {});
-    else actionRow("공휴일 데이터 없음", async () => {}, "API 키를 등록하고 동기화해 주세요.");
-  }
-
-  function renderDate() {
-    const date = state.date;
-    header(`틴토리 · ${date}`);
-    actionRow("‹ 달력으로", async () => { state.screen = "month"; });
-    const holidays = (data.holidays[date.slice(0, 7)] || {})[date] || [];
-    for (const name of holidays) actionRow(`🔴 ${name}`, async () => {}, "공휴일");
-    const entries = data.entries.filter(e => e.date === date && (state.filter === "all" || e.themeId === state.filter));
-    for (const entry of entries) {
-      const theme = data.themes.find(x => x.id === entry.themeId);
-      const row = actionRow(`${entry.kind === "diary" ? "✎" : "◷"} ${entry.title}`, () => editEntry(entry), `${theme ? theme.name : ""} · ${entry.kind === "diary" ? "일기" : "일정"}`);
-      if (theme) row.backgroundColor = new Color(theme.color, 0.18);
-    }
-    actionRow("+ 일정 추가", () => addEntry("event"));
-    actionRow("+ 일기 쓰기", () => addEntry("diary"));
-  }
-
-  async function selectTheme() {
-    const alert = new Alert();
-    alert.title = "테마 선택";
-    data.themes.forEach(t => alert.addAction(t.name));
-    alert.addCancelAction("취소");
-    const index = await alert.presentSheet();
-    return index >= 0 ? data.themes[index] : null;
-  }
-
-  async function addEntry(kind) {
-    const theme = await selectTheme();
-    if (!theme) return;
-    const alert = new Alert();
-    alert.title = kind === "diary" ? "일기 쓰기" : "일정 추가";
-    alert.addTextField("제목", "");
-    alert.addTextField(kind === "diary" ? "내용" : "시간 또는 메모", "");
-    alert.addAction("저장");
-    alert.addCancelAction("취소");
-    if (await alert.presentAlert() < 0) return;
-    const title = alert.textFieldValue(0).trim();
-    if (!title) { await message("저장 실패", "제목을 입력해 주세요."); return; }
-    data.entries.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, date: state.date,
-      kind, themeId: theme.id, title, body: alert.textFieldValue(1).trim() });
-    save();
-  }
-
-  async function editEntry(entry) {
-    const alert = new Alert();
-    alert.title = entry.kind === "diary" ? "일기" : "일정";
-    alert.addTextField("제목", entry.title);
-    alert.addTextField("내용", entry.body || "");
-    alert.addAction("수정 저장");
-    alert.addDestructiveAction("삭제");
-    alert.addCancelAction("취소");
-    const result = await alert.presentAlert();
-    if (result === 0) {
-      const title = alert.textFieldValue(0).trim();
-      if (!title) { await message("저장 실패", "제목을 입력해 주세요."); return; }
-      entry.title = title; entry.body = alert.textFieldValue(1).trim(); save();
-    } else if (result === 1) {
-      const confirm = new Alert();
-      confirm.title = "기록 삭제";
-      confirm.message = `“${entry.title}”을 삭제할까요?`;
-      confirm.addDestructiveAction("삭제"); confirm.addCancelAction("취소");
-      if (await confirm.presentAlert() === 0) {
-        data.entries = data.entries.filter(e => e.id !== entry.id); save();
-      }
-    }
-  }
-
-  async function manageThemes() {
-    const alert = new Alert();
-    alert.title = "테마 관리";
-    data.themes.forEach(t => alert.addAction(t.name));
-    alert.addAction("+ 새 테마"); alert.addCancelAction("취소");
-    const choice = await alert.presentSheet();
-    if (choice < 0) return;
-    const previous = data.themes[choice];
-    const form = new Alert();
-    form.title = previous ? "테마 수정" : "새 테마";
-    form.addTextField("이름", previous ? previous.name : "");
-    form.addTextField("색상 (#RRGGBB)", previous ? previous.color : "#a98bd6");
-    form.addAction("저장"); form.addCancelAction("취소");
-    if (await form.presentAlert() < 0) return;
-    const name = form.textFieldValue(0).trim();
-    const color = form.textFieldValue(1).trim();
-    if (!name || !/^#[0-9a-fA-F]{6}$/.test(color)) {
-      await message("저장 실패", "이름과 #RRGGBB 형식의 색상을 입력해 주세요."); return;
-    }
-    if (previous) { previous.name = name; previous.color = color; }
-    else data.themes.push({ id: `${Date.now()}`, name, color });
-    save();
-  }
-
-  await syncHolidays(false);
-  render();
-  await table.present(true);
-  Script.complete();
+  try {
+    const encoded = JSON.stringify({ id: event.id, ...reply }).replace(/</g, "\\u003c");
+    await view.evaluateJavaScript("window.TintoryBridge.resolve(" + encoded + ")", false);
+  } catch (_) { break; }
 }
+await closed;
+Script.complete();
+}
+await main();

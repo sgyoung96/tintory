@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const source = fs.readFileSync(require.resolve("./Tintory.js"), "utf8");
+const source = fs.readFileSync(require.resolve("./TintoryLegacy.js"), "utf8");
 const sandbox = { module: { exports: {} } };
 vm.runInNewContext(source.replace("await runTintory();", "runTintory();"), sandbox);
 const { emptyData, parseHolidayXml, normalizeKey, applyHolidays, fetchHolidays } = sandbox.module.exports;
