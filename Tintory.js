@@ -243,4 +243,13 @@ while (!dismissed) {
 await closed;
 Script.complete();
 }
-await main();
+try {
+  await main();
+} catch (error) {
+  const box = new Alert();
+  box.title = "틴토리를 열 수 없어요";
+  box.message = String(error && (error.stack || error.message) || error);
+  box.addAction("확인");
+  await box.presentAlert();
+  Script.complete();
+}

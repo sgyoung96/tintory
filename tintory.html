@@ -119,12 +119,13 @@
 </head>
 <body data-tintory-ui="1">
   <!--TINTORY_BOOTSTRAP-->
-  <div class="app" id="app"></div>
+  <div class="app" id="app"><div style="padding:80px 8px;color:#655e69;text-align:center">Tintory를 여는 중...</div></div>
   <div class="modal-backdrop" id="modal-backdrop"><div class="modal" id="modal"></div></div>
   <div class="toast" id="toast" role="status"></div>
   <script>
     (function () {
       "use strict";
+      try {
       const native = !!window.__TINTORY_NATIVE__;
       const previewKey = "tintory-preview-v1";
       const now = new Date();
@@ -521,6 +522,12 @@
       });
       render();
       if (native) sync(false);
+      } catch (error) {
+        const app = document.getElementById("app");
+        app.textContent = "틴토리 화면 오류: " + (error && error.message || error);
+        app.style.paddingTop = "80px";
+        app.style.overflowWrap = "anywhere";
+      }
     })();
   </script>
 </body>
